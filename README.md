@@ -23,3 +23,8 @@ python scripts/geojson2coco.py \
 --json-name example_coco.json
 ```
 
+### Additional comments:
+
+1) make sure to update the EPSG code for your .tif in the 'geojson2coco.py' code
+2) the code assumes your geojson with annotations has a text column for the class name
+3) Some updates were made to make it compatible with the shapely >2.0
