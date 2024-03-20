@@ -1,0 +1,11 @@
+name: gis2coco
+channels:
+  - conda-forge
+  - defaults
+  - nvidia
+dependencies:
+  - opencv
+  - glob2
+  - geopandas
+  - rasterio
+  - shapely

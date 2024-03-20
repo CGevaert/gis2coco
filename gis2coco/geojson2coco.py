@@ -59,7 +59,8 @@ def write_raster_tiles(infile, out_path):
             with rio.open(outpath, 'w', **meta) as outds:
                 outds.write(inds.read(window=window))
 
-def get_tile_polygons(raster_tile, geojson, project_crs = "EPSG:3577", filter = True):
+def get_tile_polygons(raster_tile, geojson, project_crs = "EPSG:32631", filter = False):
+    # NOTE: changed EPSG:3577 here to "EPSG:32631" to be compatible with my files, should actually be to args.crs
     
     """
     Create polygons from a geosjon for an individual raster tile.
@@ -179,7 +180,7 @@ def spatial_polygon_to_pixel(raster_tile, spatial_polygon):
     point_list = MultiPoint(spatial_polygon.exterior.coords)
     converted_coords = []
     
-    for point in point_list:
+    for point in point_list.geoms: # added .geoms due to shapely update from 1.8 to 2.0
         x, y = spatial_to_pixel(raster.GetGeoTransform(), point.x, point.y)
         pixel_point = x, y
         converted_coords.append(pixel_point)
@@ -196,7 +197,7 @@ def pixel_polygons_for_raster_tiles(raster_file_list, geojson):
         tmp['raster_tile'] = file
         tmp['image_id'] = index
         tmp_list.append(tmp)
-        
+    
     pixel_df = pd.concat(tmp_list).reset_index() 
     pixel_df = pixel_df.drop(columns=['index'])
     pixel_df['pixel_polygon'] = pixel_df.apply(lambda row: spatial_polygon_to_pixel(row['raster_tile'], row['geometry']), axis = 1)
@@ -291,7 +292,7 @@ def assemble_coco_json(raster_file_list, geojson, license_json, info_json, categ
     coco.categories = categories_json
     coco.info = info_json
     
-    return(coco)
+    return(coco,pixel_poly_df)
 
 
 #%% Command-line driver
@@ -304,10 +305,10 @@ def main(args=None):
     ap.add_argument("--tile-dir", required = True, type = Path)
     ap.add_argument("--class-column", type = str, help = "Column name in GeoJSON where classes are stored.")
     ap.add_argument("--json-name", default="coco_from_gis.json", type=Path)
-    ap.add_argument("--crs", type = str, help = "Specifiy the project crs to use.")
+    ap.add_argument("--crs", required = True, type = str, help = "Specifiy the project crs to use.")
     ap.add_argument("--trim-class", default = 0, type = int, help = "Characters to trim of the start of each class name. A clummsy solution, set to 0 by default which leaves class names as is.")
     ap.add_argument("--cleanup", default = False, type = bool, help = "If set to true, will purge *.tif tiles from the directory. Default to false.")
-    ap.add_argument("--save-gdf", default = True, type = bool, help = "If set to true, will save a GeoDataFrame that you can use to reconstruct a spatial version of the dataset.")
+    ap.add_argument("--save-gdf", default = False, type = bool, help = "If set to true, will save a GeoDataFrame that you can use to reconstruct a spatial version of the dataset.")
     ap.add_argument("--short-file-name", type = bool, help = "If True, saves a short file name in the COCO for images.")
     ap.add_argument("--license", type = Path, help = "Path to a license description in COCO JSON format. If not supplied, will default to MIT license.")
     ap.add_argument("--info", required = True, type = Path, help = "Path to info description in COCO JSON format.")
@@ -345,7 +346,8 @@ def main(args=None):
     print(f"{len(raster_file_list)} raster tiles created")
     # Read geojson file.
     geojson = gpd.read_file(args.polygon_file)
-    geojson = geojson.to_crs({'init': 'epsg:3577'})
+    geojson = geojson.to_crs(args.crs)
+    #geojson = geojson.to_crs({'init': 'epsg:3577'})
 
     # Create class_id for category mapping
     geojson['class_id'] = geojson[args.class_column].factorize()[0]
@@ -367,7 +369,7 @@ def main(args=None):
 
     print("Converting to COCO")
     # We are now ready to make the COCO JSON.
-    spatial_coco = assemble_coco_json(raster_file_list, geojson, license_json, info_json, categories_json)
+    spatial_coco, pixel_poly_df = assemble_coco_json(raster_file_list, geojson, license_json, info_json, categories_json)
 
     # Write COCO JSON to file.
     with open (args.json_name, "w") as f:
@@ -377,8 +379,9 @@ def main(args=None):
     if args.save_gdf == True:
         
         pixel_poly_df['raster_tile_name'] = pixel_poly_df.apply(lambda row: os.path.basename(row['raster_tile']), axis = 1)
+        print(f'{pixel_poly_df=}')
         
-        with open ("gdf_output.csv, "w") as f:
+        with open ("gdf_output.csv", "w") as f:
             f.write(pixel_poly_df)
     
 if __name__ == '__main__':
